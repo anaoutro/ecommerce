@@ -1,0 +1,76 @@
+name: ja-eletronicos-local
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ja_loja
+      MARIADB_USER: ja_loja
+      MARIADB_PASSWORD_FILE: /run/secrets/db_password
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+    secrets: [db_password, db_root_password]
+    volumes: [database:/var/lib/mysql]
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  wordpress:
+    image: wordpress:php8.3-apache
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports: ['127.0.0.1:8090:80']
+    environment: &wordpress_environment
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: ja_loja
+      WORDPRESS_DB_USER: ja_loja
+      WORDPRESS_DB_PASSWORD_FILE: /run/secrets/db_password
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_ENVIRONMENT_TYPE', 'local');
+        define('JA_LOCAL_MAIL_HOST', 'mailpit');
+        define('DISALLOW_FILE_EDIT', true);
+    secrets: [db_password]
+    volumes:
+      - website:/var/www/html
+      - ./packages/ja-eletronicos-theme:/var/www/html/wp-content/themes/ja-eletronicos-theme:ro
+      - ./packages/ja-loja-core:/var/www/html/wp-content/plugins/ja-loja-core:ro
+      - ./setup:/ja/setup:ro
+      - ./tools:/ja/tools:ro
+      - ./imports:/ja/imports:ro
+    healthcheck:
+      test: [CMD-SHELL, 'test -f /var/www/html/wp-config.php']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports: ['127.0.0.1:8025:8025']
+  install:
+    image: wordpress:php8.3-apache
+    profiles: [setup]
+    entrypoint: [bash, /ja/setup/install.sh]
+    depends_on:
+      wordpress:
+        condition: service_healthy
+    environment: *wordpress_environment
+    secrets: [bootstrap, db_password]
+    volumes:
+      - website:/var/www/html
+      - ./packages/ja-eletronicos-theme:/var/www/html/wp-content/themes/ja-eletronicos-theme:ro
+      - ./packages/ja-loja-core:/var/www/html/wp-content/plugins/ja-loja-core:ro
+      - ./setup:/ja/setup:ro
+      - ./tools:/ja/tools:ro
+      - ./imports:/ja/imports:ro
+volumes:
+  database:
+  website:
+secrets:
+  db_password:
+    file: ./.secrets/db_password
+  db_root_password:
+    file: ./.secrets/db_root_password
+  bootstrap:
+    file: ./.secrets/bootstrap.json
